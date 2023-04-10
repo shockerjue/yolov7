@@ -29,11 +29,24 @@ class Detect(nn.Module):
 
     def __init__(self, nc=80, anchors=(), ch=()):  # detection layer
         super(Detect, self).__init__()
-        self.nc = nc  # number of classes
-        self.no = nc + 5  # number of outputs per anchor
-        self.nl = len(anchors)  # number of detection layers
-        self.na = len(anchors[0]) // 2  # number of anchors
-        self.grid = [torch.zeros(1)] * self.nl  # init grid
+        self.nc = nc  # number of classes = 80
+        self.no = nc + 5  # number of outputs per anchor = 85
+        self.nl = len(anchors)  # number of detection layers = 3
+        self.na = len(anchors[0]) // 2  # number of anchors = 3
+        self.grid = [torch.zeros(1)] * self.nl  # init grid  = 
+        """
+        tensor([[[ 12.,  16.],
+         [ 19.,  36.],
+         [ 40.,  28.]],
+
+        [[ 36.,  75.],
+         [ 76.,  55.],
+         [ 72., 146.]],
+
+        [[142., 110.],
+         [192., 243.],
+         [459., 401.]]])
+        """
         a = torch.tensor(anchors).float().view(self.nl, -1, 2)
         self.register_buffer('anchors', a)  # shape(nl,na,2)
         self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
@@ -103,17 +116,46 @@ class IDetect(nn.Module):
 
     def __init__(self, nc=80, anchors=(), ch=()):  # detection layer
         super(IDetect, self).__init__()
-        self.nc = nc  # number of classes
+        # 80
+        self.nc = nc  # number of classes 
+        # 85
         self.no = nc + 5  # number of outputs per anchor
+        # 3
         self.nl = len(anchors)  # number of detection layers
+        # 3
         self.na = len(anchors[0]) // 2  # number of anchors
+        # [tensor([0.]), tensor([0.]), tensor([0.])]
         self.grid = [torch.zeros(1)] * self.nl  # init grid
+        """
+        tensor([[[ 12.,  16.],
+         [ 19.,  36.],
+         [ 40.,  28.]],
+
+        [[ 36.,  75.],
+         [ 76.,  55.],
+         [ 72., 146.]],
+
+        [[142., 110.],
+         [192., 243.],
+         [459., 401.]]])
+        """
         a = torch.tensor(anchors).float().view(self.nl, -1, 2)
+        #模型中保存的参数有两种：y一种是反向传播需要被optimizer更新的，称之为parameter
+        #一种是反向传播不需要被optimizer更新，称为buffer
+        #第二种参数需要创建tensor，然后将tensor通过register——buffer进行注册
+        #可以通过model。buffers（）返回，注册完成后参数也会自动保存到orderdict中去
+        #optim.step 只能更新nn.parameter 类型的参数
+        # 注册缓冲，可以直接通过model.anchors进行访问
         self.register_buffer('anchors', a)  # shape(nl,na,2)
+        # 注册缓冲，可以直接通过model.anchor_grid访问
         self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
+
+        # self.no*self.na = 85*3=255
         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
         
+        # 正态分布加张量
         self.ia = nn.ModuleList(ImplicitA(x) for x in ch)
+        # 正态分布乘以张量
         self.im = nn.ModuleList(ImplicitM(self.no * self.na) for _ in ch)
 
     def forward(self, x):

@@ -16,6 +16,7 @@ import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 import torch.utils.data
 import yaml
+# 自动混合精度，可以在神经网络推理过程中，针对不同的层，采用不同的数据精度进行计算，从而实现节省显存和加快速度的目的。
 from torch.cuda import amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
@@ -37,7 +38,12 @@ from utils.wandb_logging.wandb_utils import WandbLogger, check_wandb_resume
 
 logger = logging.getLogger(__name__)
 
-
+"""  
+:params hyp: data/hyps/hyp.scratch.yaml   hyp dictionary  
+:params opt: main中opt参数  
+:params device: 当前设备  
+:params callbacks: 和日志相关的回调函数https://start.oneflow.org/oneflow-yolo-doc/source_code_interpretation/callbacks_py.html  
+"""  
 def train(hyp, opt, device, tb_writer=None):
     logger.info(colorstr('hyperparameters: ') + ', '.join(f'{k}={v}' for k, v in hyp.items()))
     save_dir, epochs, batch_size, total_batch_size, weights, rank, freeze = \
@@ -661,6 +667,18 @@ if __name__ == '__main__':
         if opt.bucket:
             os.system('gsutil cp gs://%s/evolve.txt .' % opt.bucket)  # download evolve.txt if exists
 
+        """  
+        使用遗传算法进行参数进化 默认是进化300代  
+        这里的进化算法原理为：根据之前训练时的hyp来确定一个base hyp再进行突变，具体是通过之前每次进化得到的results来确定之前每个hyp的权重，有了每个hyp和每个hyp的权重之后有两种进化方式；  
+        1.根据每个hyp的权重随机选择一个之前的hyp作为base hyp，random.choices(range(n), weights=w)  
+        2.根据每个hyp的权重对之前所有的hyp进行融合获得一个base hyp，(x * w.reshape(n, 1)).sum(0) / w.sum()  
+        evolve.txt会记录每次进化之后的results+hyp  
+        每次进化时，hyp会根据之前的results进行从大到小的排序；  
+        再根据fitness函数计算之前每次进化得到的hyp的权重  
+        (其中fitness是我们寻求最大化的值。在YOLOv5中，fitness函数实现对 [P, R, mAP@.5, mAP@.5-.95] 指标进行加权。)  
+        再确定哪一种进化方式，从而进行进化。  
+        这部分代码其实不是很重要并且也比较难理解，大家如果没有特殊必要的话可以忽略，因为正常训练也不会用到超参数进化。  
+        """  
         for _ in range(300):  # generations to evolve
             if Path('evolve.txt').exists():  # if evolve.txt exists: select best hyps and mutate
                 # Select parent(s)

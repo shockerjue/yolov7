@@ -89,6 +89,7 @@ def detect(save_img=False):
         t2 = time_synchronized()
 
         # Apply NMS
+        # 使用极大值抑制处理box
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t3 = time_synchronized()
 
@@ -98,6 +99,7 @@ def detect(save_img=False):
 
         # Process detections
         for i, det in enumerate(pred):  # detections per image
+            print(det.shape)
             if webcam:  # batch_size >= 1
                 p, s, im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
             else:
