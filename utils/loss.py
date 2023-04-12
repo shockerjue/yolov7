@@ -431,6 +431,7 @@ class APLoss(torch.autograd.Function):
 
 
 # http://www.yaotu.net/biancheng/273401.html
+# https://mp.weixin.qq.com/s?__biz=MzI1Njg2NjkwNg==&mid=2247489207&idx=1&sn=4f37a09c3849038542fa38eca847b512&chksm=ea217982dd56f094c80ea176256e9c3c19e3b958343f3b429d7cef7ad1e613d24fbcf1a251cc&scene=27
 class ComputeLoss:
     # Compute losses
     def __init__(self, model, autobalance=False):
@@ -488,7 +489,7 @@ class ComputeLoss:
         :params p:  预测框 由模型构建中的 Detect 层返回的三个yolo层的输出（注意是训练模式才返回三个yolo层的输出）
                     tensor格式 list列表 存放三个tensor 对应的是三个yolo层的输出
                     如: ([16, 3, 80, 80, 85], [16, 3, 40, 40, 85],[16, 3, 20, 20, 85])
-                    [bs, anchor_num, grid_h, grid_w, xywh+class+classes]
+                    [bs, anchor_num, grid_h, grid_w, xywh+classes+ ...]
                     可以看出来这里的预测值 p 是三个yolo层每个 grid_cell
                     的预测值(每个 grid_cell 有三个预测值), 后面要进行正样本筛选
         :params targets: 数据增强后的真实框 [314, 6] [num_object,  batch_index+class+xywh]
@@ -673,7 +674,7 @@ class ComputeLoss:
                    预测框,由模型构建中的三个检测头Detector返回的三个yolo特征层的输出
                    tensor格式 list列表 存放三个tensor 对应的是三个yolo特征层的输出
                    如: list([16, 3, 80, 80, 85], [16, 3, 40, 40, 85],[16, 3, 20, 20, 85])
-                   [bs, anchor_num, grid_h, grid_w, xywh+class+classes]
+                   [bs, anchor_num, grid_h, grid_w, xywh+classes+...]
                    可以看出来这里的预测值p是三个yolo特征层中每个grid_cell(每个grid_cell有三个预测值)的预测值,后面肯定要进行正样本筛选
         :params targets: 数据增强后的真实框 [63, 6] [num_target,  image_index+class+xywh] xywh为归一化后的框
         :return tcls: 表示这个target所属的class index
@@ -694,7 +695,7 @@ class ComputeLoss:
 
         # gain.shape=[7]
         # 用来将target缩放到特征层上
-        # 格式：(anch_index,image_index,classes,x,y,w,h)
+        # 格式：(image_index,classes,x,y,w,h,anch_index)
         gain = torch.ones(7, device=targets.device).long()  # normalized to gridspace gain
 
         # 主要是用来标记真实目标对应特征层上的索引，看目标是否存在特征层上，如果存在的话具体是存在哪个特征层
