@@ -150,7 +150,6 @@ class ComputeLoss:
             if n:
                 # 精确得到第 b 张图片的第 a 个 feature map 的 grid_cell(gi, gj) 对应的预测值
                 # 用这个预测值与我们筛选的这个 grid_cell 的真实框进行预测(计算损失)
-                # pxy, pwh, _, pcls = pi[b, a, gj, gi].tensor_split((2, 4, 5), dim=1)
                 """
                 主要是通过targets构建的anchor取出对应特征图上数据,也就是有目标的特征数据
                 [561, 85] 其中[num_targets, xycwh]
@@ -196,17 +195,25 @@ class ComputeLoss:
                     pkpt_score = ps[:, 8::3]
 
                     #mask
-                    # 计算关键点置信度损失
+                    # 计算关键点置信度损失，其中tkpt主要是取出x的值
                     kpt_mask = (tkpt[i][:, 0::2] != 0)
                     lkptv += self.BCEcls(pkpt_score, kpt_mask.float()) 
 
                     #l2 distance based loss
                     #lkpt += (((pkpt-tkpt[i])*kpt_mask)**2).mean()  #Try to make this loss based on distance instead of ordinary difference
                     #oks based loss
-                    # 计算关键点损失
+                    # 下面主要是计算关键点损失
+
+                    # 计算两点直接的距离
                     d = (pkpt_x-tkpt[i][:,0::2])**2 + (pkpt_y-tkpt[i][:,1::2])**2
+
+                    # 计算所有矩形的面积，也就是w*h
                     s = torch.prod(tbox[i][:,-2:], dim=1, keepdim=True)
+
+                    
                     kpt_loss_factor = (torch.sum(kpt_mask != 0) + torch.sum(kpt_mask == 0))/torch.sum(kpt_mask != 0)
+
+                    # 计算关键点损失
                     lkpt += kpt_loss_factor*((1 - torch.exp(-d/(s*(4*sigmas**2)+1e-9)))*kpt_mask).mean()
 
                 # Objectness
@@ -223,6 +230,7 @@ class ComputeLoss:
                 # with open('targets.txt', 'a') as file:
                 #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
 
+            # 取出置信度信息，计算置信度损失
             obji = self.BCEobj(pi[..., 4], tobj)
             lobj += obji * self.balance[i]  # obj loss
             if self.autobalance:
@@ -271,7 +279,7 @@ class ComputeLoss:
                    如: list([16, 3, 80, 80, 136], [16, 3, 40, 40, 136],[16, 3, 20, 20, 136])
                    [bs, anchor_num, grid_h, grid_w, classes+xywh+x1y1score1+x2y2score2+...]
                    可以看出来这里的预测值p是三个yolo特征层中每个grid_cell(每个grid_cell有三个预测值)的预测值,后面肯定要进行正样本筛选
-        :params targets: 数据增强后的真实框 [63, 40] [num_target,  image_index+class+xywh+x1y1+...] xywh为归一化后的框
+        :params targets: 数据增强后的真实框 [63, 40] [num_target,  image_index+class+xywh+x1y1 + ...] xywh为归一化后的框
         :return tcls: 表示这个target所属的class index
                 tbox: xywh 其中xy为这个target对当前grid_cell左上角的偏移量
                 tkpt: 存储对应关键点的信息
@@ -323,16 +331,18 @@ class ComputeLoss:
                             ], device=targets.device).float() * g  # offsets
 
         for i in range(self.nl):
-            # 获取特征层对应的anchor张量
+            # 获取特征层对应的anchor张量[[19,27], [44,40], [38,94]]
             anchors = self.anchors[i]
             if self.kpt_label:
                 # 用特征层的wh初始化关键点的信息,也就是x1y1,...
+                # [image_index, class, x, y, w, h, x1y1, x2y2, x3y3, ..., x17y17, anchor_index]
                 gain[2:40] = torch.tensor(p[i].shape)[19*[3, 2]]  # xyxy gain
             else:
                 gain[2:6] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain
 
             # Match targets to anchors
-            # 将真实目标关键信息映射到特征层上
+            # 将真实目标关键信息与anchor关联，同时将其转换成特征上的坐标
+            # 经过*运算以后，得到的就是特征层上的对应坐标
             # 注：真实目标的信息是经过归一化的，这里讲起映射到特征层上
             """
             [image_index, class, x, y, w, h, x1y1, x2y2, x3y3, ..., x17y17, anchor_index]
@@ -372,7 +382,7 @@ class ComputeLoss:
                     [ True,  True,  True]]) 
                 """
                 j = torch.max(r, 1. / r).max(2)[0] < self.hyp['anchor_t']  # compare
-                # j = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n)=wh_iou(anchors(3,2), gwh(n,2))
+
                 # 根据筛选条件j, 过滤负样本, 得到所有gt的anchor正样本(batch_size张图片)
                 # 知道当前gt的坐标 属于哪张图片 正样本对应的idx 也就得到了当前gt的正样本anchor
                 # t: [3, 314, 7] -> [555, 7]  [num_Positive_sample, image_index+class+xywh+anchor_index]
@@ -384,40 +394,91 @@ class ComputeLoss:
                 [ 0.00000,  0.00000,  5.98400,  9.76000,  9.54680, 14.60120,  2.00000],
                 [ 0.00000,  0.00000, 14.50120,  9.80680,  8.79800, 15.81800,  2.00000]])
                 """
-                # 保留下来就是在对应的anchors有匹配的正样本
+                # 根据过滤后的信息，可以看出，保留下来的就是真实目标在特征层上的映射
                 t = t[j]  # filter
 
                 # Offsets
+                # 得到过滤后目标的中心点坐标 
+                # 筛选当前格子周围格子 找到 2 个离target中心最近的两个格子  
+                # 可能周围的格子也预测到了高质量的样本 我们也要把这部分的预测信息加入正样本中
+                # 除了target所在的当前格子外, 还有2个格子对目标进行检测(计算损失) 
+                # 也就是说一个目标需要3个格子去预测(计算损失)
+                # 首先当前格子是其中1个 再从当前格子的上下左右四个格子中选择2个
+                # 用这三个格子去预测这个目标(计算损失)
+                # feature map上的原点在左上角 向右为x轴正坐标 向下为y轴正坐标
+                # 取target中心的坐标xy(相对feature map左上角的坐标)
                 gxy = t[:, 2:4]  # grid xy
+
+                # 得到中心点相对于边界的距离
+                # 得到target中心点相对于右下角的坐标 
+                # gxi.shape = [555, 2]
                 gxi = gain[[2, 3]] - gxy  # inverse
+
+                # jk和lm是判断gxy的中心点更偏向哪里
+                # 筛选中心坐标距离当前grid_cell的左、上方偏移小于g=0.5 
+                # 且 中心坐标必须大于1(坐标不能在边上 此时就没有4个格子了)
+                # j: [555] bool 如果是True表示当前target中心点所在的格子的左边格子也对该target进行回归(后续进行计算损失)
+                # k: [555] bool 如果是True表示当前target中心点所在的格子的上边格子也对该target进行回归(后续进行计算损失)
                 j, k = ((gxy % 1. < g) & (gxy > 1.)).T
+
+                # 筛选中心坐标距离当前grid_cell的右、下方偏移小于g=0.5 且 中心坐标必须大于1(坐标不能在边上 此时就没有4个格子了)
+                # l: [555] bool 如果是True表示当前target中心点所在的格子的右边格子也对该target进行回归(后续进行计算损失)
+                # m: [555] bool 如果是True表示当前target中心点所在的格子的下边格子也对该target进行回归(后续进行计算损失)
                 l, m = ((gxi % 1. < g) & (gxi > 1.)).T
 
+                # 得到的j如下，包含当前网格有五个cell，第一行保留所有的gtbox，第二行表示左边的cell中的gt，
+                # 第三行是表示上方的cell中的gt，第四行是右边cell的网格，第五行是下方的cell中的gt。
+                # 这里与v3和v4不同在于之前的yolo是目标落在哪个head的cell就由该cell进行预测，
+                # 而v5通过增加邻近的cell来预测，这样就是相当于增加了正样本的数量。
                 j = torch.stack((torch.ones_like(j), j, k, l, m))
+
+                # 这里主要是进行数据的扩展，添加上下左右网格的检测，以增加正样本数量
+                # 在yolov5中不仅仅用了中心点进行预测，还采用了距离中心点网格最近的两个网格，
+                # 所以是有五种情况【四周的网格和当前中心的网格】同时用上面的j过滤，这样就可以得出哪些网格有目标
+                # 得到筛选后所有格子的正样本 格子数<=3*555 都不在边上等号成立
+                # t: [555, 7] -> 复制 5 份target[5, 555, 7]  分别对应当前格子和左上右下格子5个格子
+                # 使用 j 筛选后 t 的形状: [1659, 7] 
                 t = t.repeat((5, 1, 1))[j]
+
+                # 将扩展的检测数据进行过滤，把不可能包含的网格排除
+                # 在yolov5中不仅仅用了中心点进行预测，还采用了距离中心点网格最近的两个网格，
+                # 所以是有五种情况【四周的网格和当前中心的网格】同时用上面的j过滤，这样就可以得出哪些网格有目标
+                # flow.zeros_like(gxy)[None]: [1, 555, 2]   off[:, None]: [5, 1, 2]  => [5, 555, 2]
+                # 得到所有筛选后的网格的中心相对于这个要预测的真实框所在网格边界
+                # （左右上下边框）的偏移量，然后通过 j 筛选最终 offsets 的形状是 [1659, 2]
                 offsets = (torch.zeros_like(gxy)[None] + off[:, None])[j]
             else:
                 t = targets[0]
                 offsets = 0
 
             # Define
-            # 分离出真实目标具体的坐标信息
-            # 物体的中心点坐标，以及宽高
+            # 获取对应的图像和类别信息
             b, c = t[:, :2].long().T  # image, class
+
+            # 获取满足条件的xywh信息
             gxy = t[:, 2:4]  # grid xy
             gwh = t[:, 4:6]  # grid wh
+
+            # 预测真实框的网格所在的左上角坐标(有左上右下的网格)  
             gij = (gxy - offsets).long()
             gi, gj = gij.T  # grid xy indices
 
             # Append
+            # 获取对应的anchors信息
             a = t[:, -1].long()  # anchor indices
+
+            # 将图像索引、anchor索引以及网格中心坐标放入容器中
             indices.append((b, a, gj.clamp_(0, gain[3] - 1), gi.clamp_(0, gain[2] - 1)))  # image, anchor, grid indices
+
+            # tbix: xywh 其中xy为这个target对当前grid_cell左上角的偏移量
             tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
+
             if self.kpt_label:
-                # 计算关键点的坐标信息,并放入结果集中
+                # 计算关键点的坐标xy信息,并放入结果集中,这里的都是可信的
                 for kpt in range(self.nkpt):
                     t[:, 6+2*kpt: 6+2*(kpt+1)][t[:,6+2*kpt: 6+2*(kpt+1)] !=0] -= gij[t[:,6+2*kpt: 6+2*(kpt+1)] !=0]
                 tkpt.append(t[:, 6:-1])
+
             anch.append(anchors[a])  # anchors
             tcls.append(c)  # class
 
