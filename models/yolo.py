@@ -267,7 +267,10 @@ class IKeypoint(nn.Module):
 
             if not self.training:  # inference
                 if self.grid[i].shape[2:4] != x[i].shape[2:4]:
+                    # 生成网格信息，其中shape是(1,1,20,20,2)
                     self.grid[i] = self._make_grid(nx, ny).to(x[i].device)
+
+                # 取出网格中对应的xy
                 kpt_grid_x = self.grid[i][..., 0:1]
                 kpt_grid_y = self.grid[i][..., 1:2]
 
@@ -303,6 +306,8 @@ class IKeypoint(nn.Module):
                         y[..., 6:] = (y[..., 6:] * 2. - 0.5 + self.grid[i].repeat((1,1,1,1,self.nkpt))) * self.stride[i]  # xy
                     y = torch.cat((xy, wh, y[..., 4:]), -1)
 
+                # 将检测框变形输出
+                # shape: (16, 20, 20, 85 + 51),注：后面的51就是关键点的信息
                 z.append(y.view(bs, -1, self.no))
 
         return x if self.training else (torch.cat(z, 1), x)
